@@ -35,6 +35,9 @@ namespace extracticon
                 string inp = args[0].Replace("file://", "").Replace("/", "\\");
                 string op = args[1].Replace("file://", "").Replace("/", "\\");
 
+                // Store original path for icon extraction
+                string originalPath = inp;
+                
                 // Determine the full file path.
                 StringBuilder sb = new StringBuilder(255);
                 GetShortPathName(inp, sb, sb.Capacity);
@@ -74,7 +77,7 @@ namespace extracticon
                     IntPtr hIml = IntPtr.Zero;
                     int ret = SHGetImageList(JUMBO_SIZE, ref guidImageList, ref iImageList);
                     int ret2 = SHGetImageListHandle(JUMBO_SIZE, ref guidImageList, ref hIml);
-                    DrawImage(iImageList, iconHDCDest, IconIndex(inp, true), 0, 0, ImageListDrawItemConstants.ILD_PRESERVEALPHA);
+                    DrawImage(iImageList, iconHDCDest, IconIndex(originalPath, true), 0, 0, ImageListDrawItemConstants.ILD_PRESERVEALPHA);
                     iconBMP.Dispose();
 
                     // Find the largest dimension of the copied bitmap.
