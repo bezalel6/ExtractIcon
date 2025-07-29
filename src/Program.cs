@@ -5,15 +5,16 @@
  * 
  * Copyright © Bert Johnson (https://bertjohnson.com/) of Allcloud Inc. (https://allcloud.com/).
  * 
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
  * 
  * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
  * 
- * THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  * 
  */
 
 using System;
+using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -21,8 +22,8 @@ using System.Text;
 
 namespace extracticon
 {
-   public partial class Program
-   {
+    public partial class Program
+    {
         /// <summary>
         /// Extract an icon and paint it onto a canvas, then save as PNG.
         /// </summary>
@@ -32,12 +33,50 @@ namespace extracticon
             if (args.Length > 1)
             {
                 // Parse parameters.
-                string inp = args[0].Replace("file://", "").Replace("/", "\\");
-                string op = args[1].Replace("file://", "").Replace("/", "\\");
+                string inp = "";
+                string op = "";
+                int? customSize = null;
+
+                // Check for -size parameter
+                int argIndex = 0;
+                while (argIndex < args.Length)
+                {
+                    if (args[argIndex].ToLower() == "-size" && argIndex + 1 < args.Length)
+                    {
+                        if (int.TryParse(args[argIndex + 1], out int size) && size > 0)
+                        {
+                            customSize = size;
+                        }
+                        else
+                        {
+                            Console.WriteLine("Error: -size must be followed by a positive integer");
+                            return;
+                        }
+                        argIndex += 2;
+                    }
+                    else
+                    {
+                        if (string.IsNullOrEmpty(inp))
+                            inp = args[argIndex];
+                        else if (string.IsNullOrEmpty(op))
+                            op = args[argIndex];
+                        argIndex++;
+                    }
+                }
+
+                // Validate we have both input and output files
+                if (string.IsNullOrEmpty(inp) || string.IsNullOrEmpty(op))
+                {
+                    Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N]");
+                    return;
+                }
+
+                inp = inp.Replace("file://", "").Replace("/", "\\");
+                op = op.Replace("file://", "").Replace("/", "\\");
 
                 // Store original path for icon extraction
                 string originalPath = inp;
-                
+
                 // Determine the full file path.
                 StringBuilder sb = new StringBuilder(255);
                 GetShortPathName(inp, sb, sb.Capacity);
@@ -121,7 +160,51 @@ namespace extracticon
                     DeleteObject(iconHBitmap);
                     DeleteDC(iconHDC);
 
-                    Console.WriteLine("Success");
+                    // If custom size specified, use ImageMagick to resize
+                    if (customSize.HasValue)
+                    {
+                        // Use Lanczos filter for sharp downscaling to small icon sizes
+                        // -background none preserves transparency
+                        // -gravity center ensures centered scaling
+                        // -extent ensures exact dimensions if aspect ratio differs
+                        string magickArgs = $"convert \"{op}\" -background none -gravity center -filter Lanczos -resize {customSize.Value}x{customSize.Value} -extent {customSize.Value}x{customSize.Value} \"{op}\"";
+                        ProcessStartInfo psi = new ProcessStartInfo
+                        {
+                            FileName = "magick",
+                            Arguments = magickArgs,
+                            UseShellExecute = false,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true,
+                            CreateNoWindow = true
+                        };
+
+                        try
+                        {
+                            using (Process p = Process.Start(psi))
+                            {
+                                p.WaitForExit();
+                                if (p.ExitCode != 0)
+                                {
+                                    string error = p.StandardError.ReadToEnd();
+                                    Console.WriteLine($"Warning: ImageMagick resize failed: {error}");
+                                    Console.WriteLine("Icon extracted at original size.");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"Success - Icon extracted and resized to {customSize.Value}x{customSize.Value}");
+                                }
+                            }
+                        }
+                        catch (Exception magickEx)
+                        {
+                            Console.WriteLine($"Warning: Could not run ImageMagick: {magickEx.Message}");
+                            Console.WriteLine("Icon extracted at original size. Install ImageMagick to enable resizing.");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("Success");
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -129,7 +212,7 @@ namespace extracticon
                 }
             }
             else
-                Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image]");
+                Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N]");
         }
 
         /// <summary>
@@ -211,4 +294,3 @@ namespace extracticon
         }
     }
 }
-    

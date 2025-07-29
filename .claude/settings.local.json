@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(where msbuild)",
+      "Bash(dotnet build:*)",
+      "Bash(dotnet --list-sdks)",
+      "Bash(where devenv)",
+      "Bash(dir:*)",
+      "Bash(cmd /c:*)",
+      "Bash(powershell:*)",
+      "Bash(test:*)",
+      "Bash(C:/Windows/Microsoft.NET/Framework64/v4.0.30319/MSBuild.exe ExtractIcon.sln /p:Configuration=Release)",
+      "Bash(\"C:/Windows/Microsoft.NET/Framework64/v4.0.30319/MSBuild.exe\" ExtractIcon.sln /p:Configuration=Release)",
+      "Bash(C:/Windows/Microsoft.NET/Framework64/v4.0.30319/MSBuild.exe ExtractIcon.sln \"/p:Configuration=Release\")",
+      "Bash(rm:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(find:*)",
+      "Bash(git stash:*)"
+    ],
+    "deny": []
+  }
+}

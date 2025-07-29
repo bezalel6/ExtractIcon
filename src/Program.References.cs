@@ -42,6 +42,9 @@ namespace extracticon
         [DllImport("gdi32.dll", EntryPoint = "CreateCompatibleDC")]
         internal extern static IntPtr CreateCompatibleDC(IntPtr hdc);
 
+        [DllImport("user32.dll")]
+        internal extern static bool DestroyIcon(IntPtr hIcon);
+
         [DllImport("comctl32")]
         private extern static int ImageList_Draw(IntPtr hIml, int i, IntPtr hdcDst, int x, int y, int fStyle);
 
