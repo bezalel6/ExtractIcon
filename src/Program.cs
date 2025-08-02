@@ -22,11 +22,39 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Collections.Concurrent;
 
 namespace extracticon
 {
     public partial class Program
     {
+        /// <summary>
+        /// Compiled regex patterns for Xbox icon file matching
+        /// </summary>
+        private static readonly Regex IconFilePattern = new Regex(
+            @"^(store)?logo(\d+x\d+)?\.png$|" +                    // logo, storelogo with optional size
+            @"^square(\d+x\d+)logo\.png$|" +                       // square*logo patterns
+            @"^xbc_logo(\d+x\d+)?\.png$|" +                        // xbox classic patterns
+            @"^(small|large)?logo\.png$|" +                        // small/large variants
+            @"^splash(screen)?(image)?\.png$|" +                   // splash screen variants
+            @"^largesquare\.png$",                                 // other variants
+            RegexOptions.IgnoreCase | RegexOptions.Compiled
+        );
+
+        /// <summary>
+        /// Regex for extracting size from filename
+        /// </summary>
+        private static readonly Regex SizeExtractor = new Regex(
+            @"(\d+)x(\d+)", 
+            RegexOptions.Compiled
+        );
+
+        /// <summary>
+        /// Cache for Xbox icon discoveries to improve performance on repeated operations
+        /// </summary>
+        private static readonly ConcurrentDictionary<string, List<XboxIconCandidate>> IconCache = new ConcurrentDictionary<string, List<XboxIconCandidate>>();
+
         /// <summary>
         /// Represents an available Xbox icon file with its size
         /// </summary>
@@ -35,6 +63,7 @@ namespace extracticon
             public string FilePath { get; set; }
             public int Size { get; set; }
             public string FileName { get; set; }
+            public int Priority { get; set; }
         }
         /// <summary>
         /// Extract an icon and paint it onto a canvas, then save as PNG.
@@ -416,122 +445,244 @@ namespace extracticon
         /// <returns>The best icon candidate or null if none found</returns>
         static XboxIconCandidate FindBestXboxIcon(string contentDir, int targetSize, bool requireLarger)
         {
-            List<XboxIconCandidate> candidates = new List<XboxIconCandidate>();
-            
-            // Check for standard Xbox icon files
-            // StoreLogo.png (1080x1080)
-            string storeLogoPath = Path.Combine(contentDir, "StoreLogo.png");
-            if (File.Exists(storeLogoPath))
+            // Check cache first
+            string cacheKey = contentDir.ToLowerInvariant();
+            if (IconCache.TryGetValue(cacheKey, out var cachedCandidates))
             {
-                try
+#if DEBUG
+                Console.WriteLine("Using cached Xbox icon candidates");
+#endif
+                return SelectOptimalIcon(cachedCandidates, targetSize, requireLarger);
+            }
+
+            // Enumerate all PNG files in parallel
+            var candidates = new List<XboxIconCandidate>();
+            
+            try
+            {
+                var iconFiles = Directory.EnumerateFiles(contentDir, "*.png", SearchOption.AllDirectories)
+                    .Where(f => {
+                        // Quick path filters
+                        var relativePath = GetRelativePath(contentDir, f).ToLowerInvariant();
+                        var fileName = Path.GetFileName(f);
+                        
+                        // Check if file matches our patterns
+                        if (!IconFilePattern.IsMatch(fileName))
+                            return false;
+                        
+                        // Prioritize certain directories
+                        return relativePath.StartsWith("media\\logos\\") || 
+                               relativePath.StartsWith("resources\\") ||
+                               !relativePath.Contains("\\") || // Root directory
+                               relativePath.Contains("_data\\streamingassets\\"); // Special case for some games
+                    })
+                    .AsParallel()
+                    .WithDegreeOfParallelism(Environment.ProcessorCount)
+                    .Select<string, XboxIconCandidate>(f => {
+                        try
+                        {
+                            var candidate = new XboxIconCandidate
+                            {
+                                FilePath = f,
+                                FileName = Path.GetFileName(f),
+                                Priority = CalculatePriority(f)
+                            };
+                            
+                            // Try to extract size from filename first
+                            candidate.Size = ExtractSizeFromFileName(candidate.FileName);
+                            
+                            // If no size in filename, detect from image
+                            if (candidate.Size == 0)
+                            {
+                                using (var img = new Bitmap(f))
+                                {
+                                    candidate.Size = DetectIconSize(img);
+                                }
+                            }
+                            
+                            return candidate;
+                        }
+                        catch
+                        {
+                            return null;
+                        }
+                    })
+                    .Where(c => c != null && c.Size > 0)
+                    .ToList();
+
+                candidates.AddRange(iconFiles);
+
+#if DEBUG
+                Console.WriteLine($"Found {candidates.Count} Xbox icon candidates:");
+                foreach (var c in candidates.OrderByDescending(c => c.Priority).ThenByDescending(c => c.Size))
                 {
-                    using (Bitmap img = new Bitmap(storeLogoPath))
-                    {
-                        int size = DetectIconSize(img);
-                        candidates.Add(new XboxIconCandidate 
-                        { 
-                            FilePath = storeLogoPath, 
-                            Size = size,
-                            FileName = "StoreLogo.png"
-                        });
-#if DEBUG
-                        Console.WriteLine($"Found StoreLogo.png with size {size}x{size}");
-#endif
-                    }
+                    Console.WriteLine($"  {c.FileName} - Size: {c.Size}x{c.Size}, Priority: {c.Priority}");
                 }
-                catch { }
-            }
-            
-            // StoreLogo150x150.png
-            string logo150Path = Path.Combine(contentDir, "StoreLogo150x150.png");
-            if (File.Exists(logo150Path))
-            {
-                candidates.Add(new XboxIconCandidate 
-                { 
-                    FilePath = logo150Path, 
-                    Size = 150,
-                    FileName = "StoreLogo150x150.png"
-                });
-#if DEBUG
-                Console.WriteLine("Found StoreLogo150x150.png");
 #endif
+
+                // Cache the results
+                IconCache.TryAdd(cacheKey, candidates);
+                
+                if (candidates.Count == 0)
+                    return null;
+                
+                return SelectOptimalIcon(candidates, targetSize, requireLarger);
             }
-            
-            // StoreLogo44x44.png
-            string logo44Path = Path.Combine(contentDir, "StoreLogo44x44.png");
-            if (File.Exists(logo44Path))
+            catch (Exception ex)
             {
-                candidates.Add(new XboxIconCandidate 
-                { 
-                    FilePath = logo44Path, 
-                    Size = 44,
-                    FileName = "StoreLogo44x44.png"
-                });
 #if DEBUG
-                Console.WriteLine("Found StoreLogo44x44.png");
+                Console.WriteLine($"Error scanning for Xbox icons: {ex.Message}");
 #endif
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Get relative path (compatibility method for .NET Framework)
+        /// </summary>
+        static string GetRelativePath(string relativeTo, string path)
+        {
+            if (string.IsNullOrEmpty(relativeTo)) throw new ArgumentNullException(nameof(relativeTo));
+            if (string.IsNullOrEmpty(path)) throw new ArgumentNullException(nameof(path));
+
+            Uri fromUri = new Uri(AppendDirectorySeparatorChar(relativeTo));
+            Uri toUri = new Uri(path);
+
+            if (fromUri.Scheme != toUri.Scheme) { return path; } // path can't be made relative.
+
+            Uri relativeUri = fromUri.MakeRelativeUri(toUri);
+            string relativePath = Uri.UnescapeDataString(relativeUri.ToString());
+
+            if (toUri.Scheme.Equals("file", StringComparison.InvariantCultureIgnoreCase))
+            {
+                relativePath = relativePath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            }
+
+            return relativePath;
+        }
+        
+        static string AppendDirectorySeparatorChar(string path)
+        {
+            if (!Path.IsPathRooted(path))
+                path = Path.GetFullPath(path);
+
+            if (!path.EndsWith(Path.DirectorySeparatorChar.ToString()))
+                path += Path.DirectorySeparatorChar;
+
+            return path;
+        }
+
+        /// <summary>
+        /// Extract size from filename using regex
+        /// </summary>
+        static int ExtractSizeFromFileName(string fileName)
+        {
+            var match = SizeExtractor.Match(fileName);
+            if (match.Success)
+            {
+                if (int.TryParse(match.Groups[1].Value, out int width) &&
+                    int.TryParse(match.Groups[2].Value, out int height))
+                {
+                    // Return the smaller dimension (icons should be square)
+                    return Math.Min(width, height);
+                }
             }
             
+            // Special cases for known sizes
+            var lowerName = fileName.ToLowerInvariant();
+            if (lowerName.Contains("storelogo") && !lowerName.Contains("x"))
+                return 1080; // Default StoreLogo.png is usually 1080x1080
+            
+            return 0; // Size unknown
+        }
+
+        /// <summary>
+        /// Calculate priority score for an icon based on path and filename
+        /// </summary>
+        static int CalculatePriority(string filePath)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(filePath).ToLowerInvariant();
+            var relativePath = filePath.ToLowerInvariant();
+            
+            int score = 100;
+            
+            // Path scoring
+            if (!relativePath.Contains("\\"))
+                score += 20; // Root content directory
+            else if (relativePath.Contains("media\\logos"))
+                score += 15;
+            else if (relativePath.Contains("resources"))
+                score += 10;
+            
+            // Name scoring
+            if (fileName == "logo")
+                score += 25;
+            else if (fileName.Contains("square") && fileName.Contains("logo"))
+                score += 20;
+            else if (fileName == "storelogo" || fileName.StartsWith("storelogo"))
+                score += 15;
+            else if (fileName.Contains("xbc_logo"))
+                score += 12;
+            else if (fileName == "smalllogo" || fileName == "largelogo")
+                score += 10;
+            else if (fileName.Contains("splash"))
+                score -= 10; // Splash screens are less ideal
+            
+            return score;
+        }
+
+        /// <summary>
+        /// Select the optimal icon from candidates based on target size and requirements
+        /// </summary>
+        static XboxIconCandidate SelectOptimalIcon(List<XboxIconCandidate> candidates, int targetSize, bool requireLarger)
+        {
             if (candidates.Count == 0)
                 return null;
-                
-            // For sizes <= 128, always use 150x150 if available (better quality than 44x44)
-            // For size 256, use 150x150 unless -larger flag is set (then use 1080x1080)
-            if (targetSize <= 128)
-            {
-                // For small sizes, prefer 150x150 over 44x44 for quality
-                var best = candidates.Where(c => c.Size >= targetSize).OrderBy(c => c.Size).FirstOrDefault();
-                if (best == null)
-                {
-                    // No icon >= target size, use largest available
-                    best = candidates.OrderByDescending(c => c.Size).First();
-                }
-#if DEBUG
-                Console.WriteLine($"Selected {best.FileName} ({best.Size}x{best.Size}) for target size {targetSize}");
-#endif
-                return best;
-            }
-            else if (targetSize == 256)
-            {
-                if (requireLarger)
-                {
-                    // With -larger flag, prefer the 1080x1080 StoreLogo.png if available
-                    var storeLogo = candidates.FirstOrDefault(c => c.Size > 256);
-                    if (storeLogo != null)
-                    {
-#if DEBUG
-                        Console.WriteLine($"Selected {storeLogo.FileName} ({storeLogo.Size}x{storeLogo.Size}) for 256px output with -larger flag");
-#endif
-                        return storeLogo;
-                    }
-                }
-                
-                // Without -larger flag or if 1080px not available, use 150x150 (efficient for 256px)
-                var logo150 = candidates.FirstOrDefault(c => c.Size == 150);
-                if (logo150 != null)
-                {
-#if DEBUG
-                    Console.WriteLine($"Selected {logo150.FileName} ({logo150.Size}x{logo150.Size}) for 256px output");
-#endif
-                    return logo150;
-                }
-                
-                // Fallback to any available
-                var best = candidates.OrderByDescending(c => c.Size).First();
-#if DEBUG
-                Console.WriteLine($"Selected {best.FileName} ({best.Size}x{best.Size}) as fallback for 256px output");
-#endif
-                return best;
-            }
+            
+            // Filter by size requirement if specified
+            var eligibleCandidates = requireLarger && targetSize == 256
+                ? candidates.Where(c => c.Size >= targetSize).ToList()
+                : candidates;
+            
+            // If no candidates meet size requirement, use all
+            if (eligibleCandidates.Count == 0)
+                eligibleCandidates = candidates;
+            
+            // Calculate match scores and select best
+            return eligibleCandidates
+                .Select(c => new {
+                    Icon = c,
+                    Score = CalculateMatchScore(c, targetSize)
+                })
+                .OrderByDescending(x => x.Score)
+                .First()
+                .Icon;
+        }
+
+        /// <summary>
+        /// Calculate how well an icon matches the target size
+        /// </summary>
+        static double CalculateMatchScore(XboxIconCandidate icon, int targetSize)
+        {
+            // Size matching score (0-1, where 1 is perfect match)
+            double sizeRatio = (double)icon.Size / targetSize;
+            double sizeScore;
+            
+            if (sizeRatio == 1.0)
+                sizeScore = 1.0; // Perfect match
+            else if (sizeRatio > 1.0)
+                sizeScore = 1.0 - (Math.Log(sizeRatio) / Math.Log(2) * 0.1); // Prefer downscaling (Log2 equivalent)
             else
-            {
-                // Shouldn't happen with current size validation, but handle gracefully
-                var best = candidates.OrderBy(c => Math.Abs(c.Size - targetSize)).ThenByDescending(c => c.Size).First();
-#if DEBUG
-                Console.WriteLine($"Selected {best.FileName} ({best.Size}x{best.Size}) as nearest to target size {targetSize}");
-#endif
-                return best;
-            }
+                sizeScore = Math.Pow(sizeRatio, 2); // Penalize upscaling more
+            
+            // Quality preference (prefer larger source for better quality)
+            double qualityScore = icon.Size >= targetSize ? 1.0 : 0.7;
+            
+            // Priority score normalized to 0-1
+            double priorityScore = icon.Priority / 200.0;
+            
+            // Combined score with weights
+            return (sizeScore * 0.5) + (qualityScore * 0.3) + (priorityScore * 0.2);
         }
 
         /// <summary>
