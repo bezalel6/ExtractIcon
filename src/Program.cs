@@ -64,6 +64,7 @@ namespace extracticon
             public int Size { get; set; }
             public string FileName { get; set; }
             public int Priority { get; set; }
+            public bool IsSplash { get; set; }
         }
         /// <summary>
         /// Extract an icon and paint it onto a canvas, then save as PNG.
@@ -79,6 +80,7 @@ namespace extracticon
                 int? customSize = null;
                 bool openAfterExtract = false;
                 bool requireLarger = false; // Require using an icon larger than target size
+                bool allowSplashFallback = false; // Allow using splash screen as fallback
 
                 // Check for parameters
                 int argIndex = 0;
@@ -86,7 +88,8 @@ namespace extracticon
                 {
                     if (args[argIndex].ToLower() == "-size" && argIndex + 1 < args.Length)
                     {
-                        if (int.TryParse(args[argIndex + 1], out int size))
+                        int size;
+                        if (int.TryParse(args[argIndex + 1], out size))
                         {
                             // Check if size is a power of 2 between 4 and 256
                             if ((size & (size - 1)) == 0 && size >= 4 && size <= 256)
@@ -111,6 +114,11 @@ namespace extracticon
                         requireLarger = true;
                         argIndex++;
                     }
+                    else if (args[argIndex].ToLower() == "-splash" || args[argIndex].ToLower() == "-allowsplash")
+                    {
+                        allowSplashFallback = true;
+                        argIndex++;
+                    }
                     else
                     {
                         if (string.IsNullOrEmpty(inp))
@@ -124,10 +132,11 @@ namespace extracticon
                 // Validate we have at least an input file
                 if (string.IsNullOrEmpty(inp))
                 {
-                    Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N] [-larger]");
-                    Console.WriteLine("        extracticon.exe [input_filename] [-size N] [-larger]");
+                    Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N] [-larger] [-splash]");
+                    Console.WriteLine("        extracticon.exe [input_filename] [-size N] [-larger] [-splash]");
                     Console.WriteLine("  -size N: Optional icon size - must be a power of 2 (4, 8, 16, 32, 64, 128, or 256)");
                     Console.WriteLine("  -larger: For 256px output, uses 1080px source instead of 150px (Xbox games only)");
+                    Console.WriteLine("  -splash: Allow using splash screen as fallback if no suitable logo found (Xbox games only)");
                     Console.WriteLine("  If output_image is omitted, the icon will be saved to a temp file and opened");
                     return;
                 }
@@ -188,9 +197,9 @@ namespace extracticon
                     
                     if (ret != 0 || iImageList == null)
                     {
-                        System.Diagnostics.Debug.WriteLine($"SHGetImageList failed with HRESULT: 0x{ret:X8}");
+                        System.Diagnostics.Debug.WriteLine(String.Format("SHGetImageList failed with HRESULT: 0x{0:X8}", ret));
 #if DEBUG
-                        Console.WriteLine($"Warning: Failed to get system image list (HRESULT: 0x{ret:X8})");
+                        Console.WriteLine(String.Format("Warning: Failed to get system image list (HRESULT: 0x{0:X8})", ret));
 #endif
                     }
                     
@@ -216,47 +225,98 @@ namespace extracticon
                             int targetSize = customSize ?? 256;
                             
                             // Find the best Xbox icon based on target size and quality requirements
-                            XboxIconCandidate bestIcon = FindBestXboxIcon(contentDir, targetSize, requireLarger);
+                            XboxIconCandidate bestIcon = FindBestXboxIcon(contentDir, targetSize, requireLarger, allowSplashFallback);
                             
                             if (bestIcon != null)
                             {
                                 try
                                 {
-                                    // Load and resize the selected icon
-                                    using (Bitmap iconBitmap = new Bitmap(bestIcon.FilePath))
+                                    // Check if this is a splash screen (marked with Priority = -1)
+                                    bool isSplashScreen = bestIcon.Priority == -1;
+                                    
+                                    // If we need to resize, use appropriate method
+                                    if (bestIcon.Size != targetSize || isSplashScreen)
                                     {
-                                        // Create properly sized output
-                                        using (Bitmap resizedIcon = new Bitmap(targetSize, targetSize, System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
+                                        // Use splash screen processing for splash screens
+                                        if (isSplashScreen)
                                         {
-                                            using (Graphics g = Graphics.FromImage(resizedIcon))
+                                            if (ProcessSplashScreenToIcon(bestIcon.FilePath, op, targetSize))
                                             {
-                                                g.Clear(Color.Transparent);
-                                                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-                                                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
-                                                g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-                                                
-                                                // Center the image if it's not square
-                                                float scale = Math.Min((float)targetSize / iconBitmap.Width, (float)targetSize / iconBitmap.Height);
-                                                int width = (int)(iconBitmap.Width * scale);
-                                                int height = (int)(iconBitmap.Height * scale);
-                                                int x = (targetSize - width) / 2;
-                                                int y = (targetSize - height) / 2;
-                                                
-                                                g.DrawImage(iconBitmap, x, y, width, height);
-                                            }
-                                            
-                                            resizedIcon.Save(op, System.Drawing.Imaging.ImageFormat.Png);
-                                            extractedFromPng = true;
+                                                extractedFromPng = true;
 #if DEBUG
-                                            Console.WriteLine($"Successfully extracted and resized Xbox game icon to {targetSize}x{targetSize}");
+                                                Console.WriteLine(String.Format("Successfully cropped splash screen to {0}x{0} icon", targetSize));
 #endif
+                                                Console.WriteLine(String.Format("Using image: {0} ({1}x{1}) [Splash Screen]", bestIcon.FileName, bestIcon.Size));
+                                            }
+                                            else
+                                            {
+                                                // Fallback to regular processing if splash crop fails
+                                                if (ProcessIconWithImageMagick(bestIcon.FilePath, op, targetSize))
+                                                {
+                                                    extractedFromPng = true;
+                                                }
+                                            }
                                         }
+                                        else
+                                        {
+                                            // Use regular high-quality resizing for logos
+                                            if (ProcessIconWithImageMagick(bestIcon.FilePath, op, targetSize))
+                                            {
+                                                extractedFromPng = true;
+#if DEBUG
+                                                Console.WriteLine(String.Format("Successfully extracted and resized Xbox game icon to {0}x{0} using ImageMagick", targetSize));
+#endif
+                                                Console.WriteLine(String.Format("Using image: {0} ({1}x{1})", bestIcon.FileName, bestIcon.Size));
+                                            }
+                                            else
+                                            {
+                                                // Fallback to GDI+ if ImageMagick fails
+#if DEBUG
+                                            Console.WriteLine("ImageMagick failed, falling back to GDI+");
+#endif
+                                            using (Bitmap iconBitmap = new Bitmap(bestIcon.FilePath))
+                                            {
+                                                using (Bitmap resizedIcon = new Bitmap(targetSize, targetSize, System.Drawing.Imaging.PixelFormat.Format32bppPArgb))
+                                                {
+                                                    using (Graphics g = Graphics.FromImage(resizedIcon))
+                                                    {
+                                                        g.Clear(Color.Transparent);
+                                                        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                                                        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                                                        g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
+                                                        
+                                                        // Center the image if it's not square
+                                                        float scale = Math.Min((float)targetSize / iconBitmap.Width, (float)targetSize / iconBitmap.Height);
+                                                        int width = (int)(iconBitmap.Width * scale);
+                                                        int height = (int)(iconBitmap.Height * scale);
+                                                        int x = (targetSize - width) / 2;
+                                                        int y = (targetSize - height) / 2;
+                                                        
+                                                        g.DrawImage(iconBitmap, x, y, width, height);
+                                                    }
+                                                    
+                                                    resizedIcon.Save(op, System.Drawing.Imaging.ImageFormat.Png);
+                                                    extractedFromPng = true;
+                                                }
+                                            }
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // No resizing needed, just copy the file
+                                        File.Copy(bestIcon.FilePath, op, true);
+                                        extractedFromPng = true;
+#if DEBUG
+                                        Console.WriteLine(String.Format("Xbox game icon already at target size {0}x{0}, copied directly", targetSize));
+#endif
+                                        Console.WriteLine(String.Format("Using image: {0} ({1}x{1})", bestIcon.FileName, bestIcon.Size));
                                     }
                                 }
                                 catch (Exception ex)
                                 {
 #if DEBUG
-                                    Console.WriteLine($"Failed to process {bestIcon.FileName}: {ex.Message}");
+                                    Console.WriteLine(String.Format("Failed to process {0}: {1}", bestIcon.FileName, ex.Message));
 #endif
                                 }
                             }
@@ -268,7 +328,7 @@ namespace extracticon
                     {
                         int iconIndex = IconIndex(originalPath, true);
     #if DEBUG
-                    Console.WriteLine($"Icon index retrieved: {iconIndex}");
+                    Console.WriteLine(String.Format("Icon index retrieved: {0}", iconIndex));
 #endif
                         
                         if (isXboxGame && iconIndex != -1)
@@ -285,7 +345,7 @@ namespace extracticon
                         // Get more detailed error info for console output
                         int lastError = Marshal.GetLastWin32Error();
                         string errorMsg = GetErrorMessage(lastError);
-                        Console.WriteLine($"  Error: {errorMsg}");
+                        Console.WriteLine(String.Format("  Error: {0}", errorMsg));
                         
                         if (lastError == 5 || lastError == 1314) // Access denied or privilege not held
                         {
@@ -333,8 +393,7 @@ namespace extracticon
                         iconBMP = iconBMP.Clone(new Rectangle(0, 0, size, size), iconBMP.PixelFormat);
                     }
 
-                    // Save as a PNG.
-                    iconBMP.MakeTransparent();
+                    // Save as a PNG without MakeTransparent() which can cause edge artifacts
                     iconBMP.Save(op, System.Drawing.Imaging.ImageFormat.Png);
                     iconBMP.Dispose();
 
@@ -345,60 +404,30 @@ namespace extracticon
                     DeleteDC(iconHDC);
                     } // End of if (!extractedFromPng)
 
-                    // If custom size specified, use ImageMagick to resize
-                    if (customSize.HasValue && File.Exists(op))
+                    // If custom size specified and we haven't already processed with ImageMagick, resize now
+                    if (customSize.HasValue && File.Exists(op) && !extractedFromPng)
                     {
-                        // Use Lanczos filter for sharp downscaling to small icon sizes
-                        // -background none preserves transparency
-                        // -gravity center ensures centered scaling
-                        // -extent ensures exact dimensions if aspect ratio differs
-                        string magickArgs = $"convert \"{op}\" -background none -gravity center -filter Lanczos -resize {customSize.Value}x{customSize.Value} -extent {customSize.Value}x{customSize.Value} \"{op}\"";
-                        ProcessStartInfo psi = new ProcessStartInfo
+                        // Use our high-quality processing method
+                        string tempFile = op + ".tmp";
+                        if (ProcessIconWithImageMagick(op, tempFile, customSize.Value))
                         {
-                            FileName = "magick",
-                            Arguments = magickArgs,
-                            UseShellExecute = false,
-                            RedirectStandardOutput = true,
-                            RedirectStandardError = true,
-                            CreateNoWindow = true
-                        };
-
-                        try
-                        {
-                            using (Process p = Process.Start(psi))
-                            {
-                                p.WaitForExit();
-                                if (p.ExitCode != 0)
-                                {
-                                    string error = p.StandardError.ReadToEnd();
-#if DEBUG
-                                    Console.WriteLine($"Warning: ImageMagick resize failed: {error}");
-                                    Console.WriteLine("Icon extracted at original size.");
-#endif
-                                }
-                                else
-                                {
-                                    Console.WriteLine("Success");
-                                }
-                            }
+                            File.Delete(op);
+                            File.Move(tempFile, op);
+                            Console.WriteLine("Success");
                         }
-                        catch (Exception magickEx)
+                        else
                         {
 #if DEBUG
-                            Console.WriteLine($"Warning: Could not run ImageMagick: {magickEx.Message}");
                             Console.WriteLine("Icon extracted at original size. Install ImageMagick to enable resizing.");
 #endif
+                            if (File.Exists(tempFile))
+                                File.Delete(tempFile);
+                            Console.WriteLine("Success");
                         }
                     }
-                    else if (!extractedFromPng)
+                    else
                     {
-                        // Only print success if we haven't already extracted from PNG
-                        Console.WriteLine("Success");
-                    }
-                    
-                    // If we extracted from Xbox PNG, print success
-                    if (extractedFromPng && !customSize.HasValue)
-                    {
+                        // Print success for all other cases
                         Console.WriteLine("Success");
                     }
 
@@ -412,12 +441,12 @@ namespace extracticon
                                 FileName = op,
                                 UseShellExecute = true
                             });
-                            Console.WriteLine($"Icon saved to: {op}");
+                            Console.WriteLine(String.Format("Icon saved to: {0}", op));
                         }
                         catch (Exception openEx)
                         {
-                            Console.WriteLine($"Warning: Could not open file: {openEx.Message}");
-                            Console.WriteLine($"Icon saved to: {op}");
+                            Console.WriteLine(String.Format("Warning: Could not open file: {0}", openEx.Message));
+                            Console.WriteLine(String.Format("Icon saved to: {0}", op));
                         }
                     }
                 }
@@ -428,10 +457,11 @@ namespace extracticon
             }
             else
             {
-                Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N] [-larger]");
-                Console.WriteLine("        extracticon.exe [input_filename] [-size N] [-larger]");
+                Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N] [-larger] [-splash]");
+                Console.WriteLine("        extracticon.exe [input_filename] [-size N] [-larger] [-splash]");
                 Console.WriteLine("  -size N: Optional icon size - must be a power of 2 (4, 8, 16, 32, 64, 128, or 256)");
                 Console.WriteLine("  -larger: For 256px output, uses 1080px source instead of 150px (Xbox games only)");
+                Console.WriteLine("  -splash: Allow using splash screen as fallback if no suitable logo found (Xbox games only)");
                 Console.WriteLine("  If output_image is omitted, the icon will be saved to a temp file and opened");
             }
         }
@@ -442,17 +472,19 @@ namespace extracticon
         /// <param name="contentDir">The Content directory to search in</param>
         /// <param name="targetSize">The desired icon size</param>
         /// <param name="requireLarger">If true, only consider icons >= target size</param>
+        /// <param name="allowSplashFallback">If true, allow using splash screen as fallback</param>
         /// <returns>The best icon candidate or null if none found</returns>
-        static XboxIconCandidate FindBestXboxIcon(string contentDir, int targetSize, bool requireLarger)
+        static XboxIconCandidate FindBestXboxIcon(string contentDir, int targetSize, bool requireLarger, bool allowSplashFallback)
         {
             // Check cache first
             string cacheKey = contentDir.ToLowerInvariant();
-            if (IconCache.TryGetValue(cacheKey, out var cachedCandidates))
+            List<XboxIconCandidate> cachedCandidates;
+            if (IconCache.TryGetValue(cacheKey, out cachedCandidates))
             {
 #if DEBUG
                 Console.WriteLine("Using cached Xbox icon candidates");
 #endif
-                return SelectOptimalIcon(cachedCandidates, targetSize, requireLarger);
+                return SelectOptimalIcon(cachedCandidates, targetSize, requireLarger, allowSplashFallback);
             }
 
             // Enumerate all PNG files in parallel
@@ -485,19 +517,17 @@ namespace extracticon
                             {
                                 FilePath = f,
                                 FileName = Path.GetFileName(f),
-                                Priority = CalculatePriority(f)
+                                Priority = CalculatePriority(f),
+                                IsSplash = Path.GetFileName(f).ToLowerInvariant().Contains("splash")
                             };
                             
                             // Try to extract size from filename first
                             candidate.Size = ExtractSizeFromFileName(candidate.FileName);
                             
-                            // If no size in filename, detect from image
+                            // If no size in filename, read actual PNG dimensions
                             if (candidate.Size == 0)
                             {
-                                using (var img = new Bitmap(f))
-                                {
-                                    candidate.Size = DetectIconSize(img);
-                                }
+                                candidate.Size = GetPngDimensions(f);
                             }
                             
                             return candidate;
@@ -513,10 +543,10 @@ namespace extracticon
                 candidates.AddRange(iconFiles);
 
 #if DEBUG
-                Console.WriteLine($"Found {candidates.Count} Xbox icon candidates:");
+                Console.WriteLine(String.Format("Found {0} Xbox icon candidates:", candidates.Count));
                 foreach (var c in candidates.OrderByDescending(c => c.Priority).ThenByDescending(c => c.Size))
                 {
-                    Console.WriteLine($"  {c.FileName} - Size: {c.Size}x{c.Size}, Priority: {c.Priority}");
+                    Console.WriteLine(String.Format("  {0} - Size: {1}x{1}, Priority: {2}", c.FileName, c.Size, c.Priority));
                 }
 #endif
 
@@ -526,12 +556,12 @@ namespace extracticon
                 if (candidates.Count == 0)
                     return null;
                 
-                return SelectOptimalIcon(candidates, targetSize, requireLarger);
+                return SelectOptimalIcon(candidates, targetSize, requireLarger, allowSplashFallback);
             }
             catch (Exception ex)
             {
 #if DEBUG
-                Console.WriteLine($"Error scanning for Xbox icons: {ex.Message}");
+                Console.WriteLine(String.Format("Error scanning for Xbox icons: {0}", ex.Message));
 #endif
                 return null;
             }
@@ -542,8 +572,8 @@ namespace extracticon
         /// </summary>
         static string GetRelativePath(string relativeTo, string path)
         {
-            if (string.IsNullOrEmpty(relativeTo)) throw new ArgumentNullException(nameof(relativeTo));
-            if (string.IsNullOrEmpty(path)) throw new ArgumentNullException(nameof(path));
+            if (string.IsNullOrEmpty(relativeTo)) throw new ArgumentNullException("relativeTo");
+            if (string.IsNullOrEmpty(path)) throw new ArgumentNullException("path");
 
             Uri fromUri = new Uri(AppendDirectorySeparatorChar(relativeTo));
             Uri toUri = new Uri(path);
@@ -573,27 +603,58 @@ namespace extracticon
         }
 
         /// <summary>
-        /// Extract size from filename using regex
+        /// Extract size from filename using regex (does not read actual file)
         /// </summary>
         static int ExtractSizeFromFileName(string fileName)
         {
             var match = SizeExtractor.Match(fileName);
             if (match.Success)
             {
-                if (int.TryParse(match.Groups[1].Value, out int width) &&
-                    int.TryParse(match.Groups[2].Value, out int height))
+                int width, height;
+                if (int.TryParse(match.Groups[1].Value, out width) &&
+                    int.TryParse(match.Groups[2].Value, out height))
                 {
                     // Return the smaller dimension (icons should be square)
                     return Math.Min(width, height);
                 }
             }
             
-            // Special cases for known sizes
-            var lowerName = fileName.ToLowerInvariant();
-            if (lowerName.Contains("storelogo") && !lowerName.Contains("x"))
-                return 1080; // Default StoreLogo.png is usually 1080x1080
-            
+            // No hardcoded assumptions - return 0 if size not in filename
             return 0; // Size unknown
+        }
+        
+        /// <summary>
+        /// Read actual dimensions from PNG file header
+        /// </summary>
+        static int GetPngDimensions(string filePath)
+        {
+            try
+            {
+                // PNG files have their dimensions at bytes 16-23
+                // Width: bytes 16-19 (big-endian)
+                // Height: bytes 20-23 (big-endian)
+                using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                {
+                    byte[] header = new byte[24];
+                    if (stream.Read(header, 0, 24) < 24)
+                        return 0;
+                    
+                    // Check PNG signature
+                    if (header[0] != 0x89 || header[1] != 0x50 || header[2] != 0x4E || header[3] != 0x47)
+                        return 0; // Not a PNG file
+                    
+                    // Read width and height (big-endian)
+                    int width = (header[16] << 24) | (header[17] << 16) | (header[18] << 8) | header[19];
+                    int height = (header[20] << 24) | (header[21] << 16) | (header[22] << 8) | header[23];
+                    
+                    // Return the smaller dimension (for square icons)
+                    return Math.Min(width, height);
+                }
+            }
+            catch
+            {
+                return 0; // Return 0 if we can't read the file
+            }
         }
 
         /// <summary>
@@ -634,29 +695,72 @@ namespace extracticon
         /// <summary>
         /// Select the optimal icon from candidates based on target size and requirements
         /// </summary>
-        static XboxIconCandidate SelectOptimalIcon(List<XboxIconCandidate> candidates, int targetSize, bool requireLarger)
+        static XboxIconCandidate SelectOptimalIcon(List<XboxIconCandidate> candidates, int targetSize, bool requireLarger, bool allowSplashFallback)
         {
             if (candidates.Count == 0)
                 return null;
             
-            // Filter by size requirement if specified
-            var eligibleCandidates = requireLarger && targetSize == 256
-                ? candidates.Where(c => c.Size >= targetSize).ToList()
-                : candidates;
+            // First, separate splash and non-splash candidates
+            var nonSplashCandidates = candidates.Where(c => !c.IsSplash).ToList();
+            var splashCandidates = candidates.Where(c => c.IsSplash).ToList();
             
-            // If no candidates meet size requirement, use all
-            if (eligibleCandidates.Count == 0)
-                eligibleCandidates = candidates;
+            // Try to find suitable non-splash icons first
+            if (nonSplashCandidates.Count > 0)
+            {
+                // Filter by size requirement if specified
+                var eligibleCandidates = requireLarger && targetSize == 256
+                    ? nonSplashCandidates.Where(c => c.Size >= targetSize).ToList()
+                    : nonSplashCandidates;
+                
+                // If we have eligible candidates after filtering, use them
+                if (eligibleCandidates.Count > 0)
+                {
+                    // Calculate match scores and select best
+                    return eligibleCandidates
+                        .Select(c => new {
+                            Icon = c,
+                            Score = CalculateMatchScore(c, targetSize)
+                        })
+                        .OrderByDescending(x => x.Score)
+                        .First()
+                        .Icon;
+                }
+                
+                // If no candidates meet size requirement but splash fallback is NOT allowed
+                // Use the best available non-splash icon regardless of size
+                if (!allowSplashFallback)
+                {
+                    return nonSplashCandidates
+                        .Select(c => new {
+                            Icon = c,
+                            Score = CalculateMatchScore(c, targetSize)
+                        })
+                        .OrderByDescending(x => x.Score)
+                        .First()
+                        .Icon;
+                }
+            }
             
-            // Calculate match scores and select best
-            return eligibleCandidates
-                .Select(c => new {
-                    Icon = c,
-                    Score = CalculateMatchScore(c, targetSize)
-                })
-                .OrderByDescending(x => x.Score)
-                .First()
-                .Icon;
+            // If we reach here, either:
+            // 1. No non-splash icons exist, OR
+            // 2. No non-splash icons meet size requirements AND splash fallback is allowed
+            if (allowSplashFallback && splashCandidates.Count > 0)
+            {
+#if DEBUG
+                if (nonSplashCandidates.Count > 0)
+                {
+                    Console.WriteLine("No suitable logo found matching size requirements, using splash screen as fallback");
+                }
+                else
+                {
+                    Console.WriteLine("No logo icons found, using splash screen as fallback");
+                }
+#endif
+                // Return the largest splash screen
+                return splashCandidates.OrderByDescending(c => c.Size).First();
+            }
+            
+            return null;
         }
 
         /// <summary>
@@ -686,6 +790,126 @@ namespace extracticon
         }
 
         /// <summary>
+        /// Process a splash screen by cropping to square and resizing
+        /// </summary>
+        /// <param name="inputPath">Path to splash screen image</param>
+        /// <param name="outputPath">Path to output icon</param>
+        /// <param name="targetSize">Target icon size</param>
+        /// <returns>True if successful, false otherwise</returns>
+        static bool ProcessSplashScreenToIcon(string inputPath, string outputPath, int targetSize)
+        {
+            // For splash screens, we need to:
+            // 1. Get the minimum dimension (width or height)
+            // 2. Crop to square using that dimension from center
+            // 3. Resize to target size
+            // Using ImageMagick's %[fx:min(w,h)] to get minimum dimension
+            string magickArgs = String.Format("\"{0}\" " +
+                "-gravity center " +               // Focus on center of image
+                "-crop %[fx:min(w,h)]x%[fx:min(w,h)]+0+0 " +  // Crop to square using minimum dimension
+                "+repage " +                       // Reset virtual canvas
+                "-colorspace sRGB " +              // Proper color space handling
+                "-filter Mitchell " +              // Mitchell filter for icons
+                "-resize {1}x{1} " +
+                "-unsharp 0x1+0.5+0 " +           // Subtle sharpening
+                "-strip " +                        // Remove metadata
+                "-colorspace sRGB " +              // Convert back to sRGB
+                "\"{2}\"", inputPath, targetSize, outputPath);
+
+            ProcessStartInfo psi = new ProcessStartInfo
+            {
+                FileName = "magick",
+                Arguments = magickArgs,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            try
+            {
+                using (Process p = Process.Start(psi))
+                {
+                    p.WaitForExit();
+                    if (p.ExitCode != 0)
+                    {
+                        string error = p.StandardError.ReadToEnd();
+#if DEBUG
+                        Console.WriteLine(String.Format("ImageMagick splash crop error: {0}", error));
+#endif
+                        return false;
+                    }
+#if DEBUG
+                    Console.WriteLine(String.Format("Successfully cropped splash screen to {0}x{0} icon", targetSize));
+#endif
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                Console.WriteLine(String.Format("Could not process splash screen: {0}", ex.Message));
+#endif
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Process an icon using ImageMagick for high-quality resizing
+        /// </summary>
+        /// <param name="inputPath">Path to input image</param>
+        /// <param name="outputPath">Path to output image</param>
+        /// <param name="targetSize">Target size in pixels</param>
+        /// <returns>True if successful, false otherwise</returns>
+        static bool ProcessIconWithImageMagick(string inputPath, string outputPath, int targetSize)
+        {
+            // Use Mitchell filter for icons (better than Lanczos for this use case)
+            // Add subtle sharpening to compensate for downscaling
+            // Proper sRGB color space handling for gamma-aware resizing
+            string magickArgs = String.Format("\"{0}\" " +
+                "-colorspace sRGB " +              // Convert to linear color space
+                "-filter Mitchell " +              // Mitchell filter - balanced for icons
+                "-resize {1}x{1} " +
+                "-unsharp 0x1+0.5+0 " +           // Subtle sharpening (radius=0, sigma=1, amount=0.5, threshold=0)
+                "-strip " +                        // Remove metadata for smaller file
+                "-colorspace sRGB " +              // Convert back to sRGB
+                "\"{2}\"", inputPath, targetSize, outputPath);
+
+            ProcessStartInfo psi = new ProcessStartInfo
+            {
+                FileName = "magick",
+                Arguments = magickArgs,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            try
+            {
+                using (Process p = Process.Start(psi))
+                {
+                    p.WaitForExit();
+                    if (p.ExitCode != 0)
+                    {
+                        string error = p.StandardError.ReadToEnd();
+#if DEBUG
+                        Console.WriteLine(String.Format("ImageMagick error: {0}", error));
+#endif
+                        return false;
+                    }
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                Console.WriteLine(String.Format("Could not run ImageMagick: {0}", ex.Message));
+#endif
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Get a human-readable error message for a Win32 error code
         /// </summary>
         /// <param name="errorCode">The Win32 error code</param>
@@ -701,7 +925,7 @@ namespace extracticon
                 case 87: return "ERROR_INVALID_PARAMETER - The parameter is incorrect";
                 case 1223: return "ERROR_CANCELLED - The operation was cancelled by the user";
                 case 1314: return "ERROR_PRIVILEGE_NOT_HELD - A required privilege is not held by the client";
-                default: return $"Unknown error (see https://docs.microsoft.com/en-us/windows/win32/debug/system-error-codes)";
+                default: return "Unknown error (see https://docs.microsoft.com/en-us/windows/win32/debug/system-error-codes)";
             }
         }
 
@@ -819,21 +1043,21 @@ namespace extracticon
                 int errorCode = Marshal.GetLastWin32Error();
                 string errorMessage = GetErrorMessage(errorCode);
                 
-                System.Diagnostics.Debug.WriteLine($"SHGetFileInfo failed for '{fileName}'");
-                System.Diagnostics.Debug.WriteLine($"  Error code: {errorCode} (0x{errorCode:X})");
-                System.Diagnostics.Debug.WriteLine($"  Error message: {errorMessage}");
-                System.Diagnostics.Debug.WriteLine($"  File exists: {File.Exists(fileName)}");
+                System.Diagnostics.Debug.WriteLine(String.Format("SHGetFileInfo failed for '{0}'", fileName));
+                System.Diagnostics.Debug.WriteLine(String.Format("  Error code: {0} (0x{0:X})", errorCode));
+                System.Diagnostics.Debug.WriteLine(String.Format("  Error message: {0}", errorMessage));
+                System.Diagnostics.Debug.WriteLine(String.Format("  File exists: {0}", File.Exists(fileName)));
                 if (File.Exists(fileName))
                 {
                     try
                     {
                         var fileInfo = new FileInfo(fileName);
-                        System.Diagnostics.Debug.WriteLine($"  File attributes: {fileInfo.Attributes}");
-                        System.Diagnostics.Debug.WriteLine($"  File size: {fileInfo.Length} bytes");
+                        System.Diagnostics.Debug.WriteLine(String.Format("  File attributes: {0}", fileInfo.Attributes));
+                        System.Diagnostics.Debug.WriteLine(String.Format("  File size: {0} bytes", fileInfo.Length));
                     }
                     catch (Exception ex)
                     {
-                        System.Diagnostics.Debug.WriteLine($"  Could not get file info: {ex.Message}");
+                        System.Diagnostics.Debug.WriteLine(String.Format("  Could not get file info: {0}", ex.Message));
                     }
                 }
                 
