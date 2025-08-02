@@ -7,7 +7,9 @@ Simple command line utility to extract a Windows file icon as a PNG in its highe
 
 **Fixed icon extraction for system files**: Added an application manifest that declares the app as DPI-aware and uses proper Windows compatibility settings. Without this manifest, Windows would return generic cached icons instead of the actual file icons for executables in Program Files and other protected directories.
 
-**Added size selection**: You can now specify which icon size you want with the `-size` parameter. The original always extracted at 256x256; now you can choose 16, 32, 48, 64, 128, or 256 to get the high-quality icon resized to the resolution you need.
+**Added size selection**: You can now specify which icon size you want with the `-size` parameter. The original always extracted at 256x256; now you can choose any power of 2 from 4 to 256 (4, 8, 16, 32, 64, 128, or 256) to get the high-quality icon resized to the resolution you need.
+
+**Automatic preview mode**: When no output path is provided, the icon is saved to a temporary file and automatically opened in your default image viewer. Windows handles cleanup of temporary files automatically.
 
 Usage
 =====
@@ -16,6 +18,12 @@ To output the icon associated with an executable as a PNG:
 
 ```
 extracticon.exe file.exe file-icon.png
+```
+
+To extract and automatically preview an icon (saves to temp directory):
+
+```
+extracticon.exe file.exe
 ```
 
 To output the icon associated with the PDF file handler as a PNG:
@@ -29,3 +37,13 @@ To output an icon with a specific size (e.g., 64x64):
 ```
 extracticon.exe file.exe file-icon.png -size 64
 ```
+
+To extract and preview an icon at a specific size:
+
+```
+extracticon.exe file.exe -size 32
+```
+
+### Size Parameter
+
+The `-size` parameter accepts power of 2 values: 4, 8, 16, 32, 64, 128, or 256. This uses ImageMagick (if installed) to resize the extracted icon to your desired dimensions while maintaining quality.

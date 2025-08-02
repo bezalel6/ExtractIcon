@@ -30,12 +30,13 @@ namespace extracticon
         /// <param name="args">Array of command line arguments.</param>
         static void Main(string[] args)
         {
-            if (args.Length > 1)
+            if (args.Length >= 1)
             {
                 // Parse parameters.
                 string inp = "";
                 string op = "";
                 int? customSize = null;
+                bool openAfterExtract = false;
 
                 // Check for -size parameter
                 int argIndex = 0;
@@ -43,13 +44,22 @@ namespace extracticon
                 {
                     if (args[argIndex].ToLower() == "-size" && argIndex + 1 < args.Length)
                     {
-                        if (int.TryParse(args[argIndex + 1], out int size) && size > 0)
+                        if (int.TryParse(args[argIndex + 1], out int size))
                         {
-                            customSize = size;
+                            // Check if size is a power of 2 between 4 and 256
+                            if ((size & (size - 1)) == 0 && size >= 4 && size <= 256)
+                            {
+                                customSize = size;
+                            }
+                            else
+                            {
+                                Console.WriteLine("Error: -size must be a power of 2 (4, 8, 16, 32, 64, 128, or 256)");
+                                return;
+                            }
                         }
                         else
                         {
-                            Console.WriteLine("Error: -size must be followed by a positive integer");
+                            Console.WriteLine("Error: -size must be followed by a power of 2 (4, 8, 16, 32, 64, 128, or 256)");
                             return;
                         }
                         argIndex += 2;
@@ -64,11 +74,22 @@ namespace extracticon
                     }
                 }
 
-                // Validate we have both input and output files
-                if (string.IsNullOrEmpty(inp) || string.IsNullOrEmpty(op))
+                // Validate we have at least an input file
+                if (string.IsNullOrEmpty(inp))
                 {
                     Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N]");
+                    Console.WriteLine("        extracticon.exe [input_filename] [-size N]");
+                    Console.WriteLine("  -size N: Optional icon size - must be a power of 2 (4, 8, 16, 32, 64, 128, or 256)");
+                    Console.WriteLine("  If output_image is omitted, the icon will be saved to a temp file and opened");
                     return;
+                }
+
+                // If no output path provided, use temp file
+                if (string.IsNullOrEmpty(op))
+                {
+                    string tempFileName = Path.GetFileNameWithoutExtension(inp) + "_icon.png";
+                    op = Path.Combine(Path.GetTempPath(), tempFileName);
+                    openAfterExtract = true;
                 }
 
                 inp = inp.Replace("file://", "").Replace("/", "\\");
@@ -205,6 +226,25 @@ namespace extracticon
                     {
                         Console.WriteLine("Success");
                     }
+
+                    // Open the file if it was saved to temp location
+                    if (openAfterExtract && File.Exists(op))
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo
+                            {
+                                FileName = op,
+                                UseShellExecute = true
+                            });
+                            Console.WriteLine($"Icon saved to: {op}");
+                        }
+                        catch (Exception openEx)
+                        {
+                            Console.WriteLine($"Warning: Could not open file: {openEx.Message}");
+                            Console.WriteLine($"Icon saved to: {op}");
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -212,7 +252,12 @@ namespace extracticon
                 }
             }
             else
+            {
                 Console.WriteLine("Syntax: extracticon.exe [input_filename] [output_image] [-size N]");
+                Console.WriteLine("        extracticon.exe [input_filename] [-size N]");
+                Console.WriteLine("  -size N: Optional icon size - must be a power of 2 (4, 8, 16, 32, 64, 128, or 256)");
+                Console.WriteLine("  If output_image is omitted, the icon will be saved to a temp file and opened");
+            }
         }
 
         /// <summary>
