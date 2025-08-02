@@ -58,10 +58,12 @@ extracticon.exe XboxGame.exe icon.png -size 256 -larger
 
 ### Troubleshooting
 
-The debug build (`bin\Debug\extracticon.exe`) includes diagnostic logging that can help troubleshoot icon extraction issues:
-- File access errors and permission issues
-- Xbox game icon detection and selection
-- Icon size detection
-- Windows API error codes
+The debug build (`bin\Debug\extracticon.exe`) is included in this repository specifically for troubleshooting icon extraction issues. It provides detailed diagnostic logging for:
 
-Use the debug build when experiencing issues to see detailed information about the extraction process.
+- File access errors and permission issues (especially for protected directories)
+- Xbox Game Pass icon detection and file selection process
+- Icon size detection and resizing decisions
+- Windows API error codes with human-readable descriptions
+- Step-by-step extraction process for debugging failures
+
+To use the debug build, simply run `bin\Debug\extracticon.exe` instead of the release version. The debug output will help identify why icon extraction might be failing for specific files.
