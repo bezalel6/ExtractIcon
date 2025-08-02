@@ -1,8 +1,6 @@
 name: CI Build
 
 on:
-  push:
-    branches: [ master, main ]
   pull_request:
     branches: [ master, main ]
 
@@ -40,9 +38,3 @@ jobs:
           Write-Host "❌ Test failed - no output file created"
           exit 1
         }
-      
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v3
-      with:
-        name: extracticon-${{ matrix.configuration }}
-        path: bin/${{ matrix.configuration }}/extracticon.exe
