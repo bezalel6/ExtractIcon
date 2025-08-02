@@ -214,7 +214,7 @@ namespace extracticon
         [DllImport("gdi32.dll", EntryPoint = "SelectObject")]
         internal extern static IntPtr SelectObject(IntPtr hdc, IntPtr bmp);
 
-        [DllImport("shell32")]
+        [DllImport("shell32", SetLastError = true)]
         private static extern IntPtr SHGetFileInfo(string pszPath, int dwFileAttributes, ref SHFILEINFO psfi, uint cbFileInfo, uint uFlags);
 
         [DllImport("shell32.dll", EntryPoint = "#727")]

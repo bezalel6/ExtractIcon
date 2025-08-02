@@ -47,3 +47,21 @@ extracticon.exe file.exe -size 32
 ### Size Parameter
 
 The `-size` parameter accepts power of 2 values: 4, 8, 16, 32, 64, 128, or 256. This uses ImageMagick (if installed) to resize the extracted icon to your desired dimensions while maintaining quality.
+
+### Xbox Game Pass Support
+
+ExtractIcon includes special support for Xbox Game Pass applications, which store their icons as PNG files rather than embedded resources. For 256px output, you can use the `-larger` flag to force extraction from the high-resolution 1080px source icon instead of the default 150px icon, resulting in better quality at the cost of processing time.
+
+```
+extracticon.exe XboxGame.exe icon.png -size 256 -larger
+```
+
+### Troubleshooting
+
+The debug build (`bin\Debug\extracticon.exe`) includes diagnostic logging that can help troubleshoot icon extraction issues:
+- File access errors and permission issues
+- Xbox game icon detection and selection
+- Icon size detection
+- Windows API error codes
+
+Use the debug build when experiencing issues to see detailed information about the extraction process.

@@ -13,6 +13,12 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <TargetFrameworkProfile />
   </PropertyGroup>
+  <PropertyGroup>
+    <!-- Custom properties that appear in VS UI -->
+    <TestInputFile Condition="'$(TestInputFile)' == ''">$(ProjectDir)Program.cs</TestInputFile>
+    <TestOutputFile Condition="'$(TestOutputFile)' == ''">$(ProjectDir)..\test_output.png</TestOutputFile>
+    <RunPostBuildTest Condition="'$(RunPostBuildTest)' == ''">true</RunPostBuildTest>
+  </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
@@ -56,4 +62,20 @@
     <None Include="app.manifest" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent Condition="'$(RunPostBuildTest)' == 'true'">echo === Post-Build Test ===
+echo Testing ExtractIcon with sample file...
+echo Input: $(TestInputFile)
+echo Output: $(TestOutputFile)
+"$(TargetPath)" "$(TestInputFile)" "$(TestOutputFile)"
+if %ERRORLEVEL% EQU 0 (
+    echo Test PASSED - Icon extracted successfully
+) else (
+    echo Test FAILED - Error code: %ERRORLEVEL%
+)
+echo === Test Complete ===</PostBuildEvent>
+  </PropertyGroup>
+  <PropertyGroup>
+    <PostBuildEvent />
+  </PropertyGroup>
 </Project>
