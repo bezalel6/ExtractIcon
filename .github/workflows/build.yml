@@ -1,0 +1,98 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+      
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1
+      
+    - name: Restore NuGet packages
+      run: nuget restore ExtractIcon.sln
+      
+    - name: Build Release
+      run: msbuild ExtractIcon.sln /p:Configuration=Release /p:Platform="Any CPU"
+      
+    - name: Build Debug
+      run: msbuild ExtractIcon.sln /p:Configuration=Debug /p:Platform="Any CPU"
+      
+    - name: Upload Release artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: extracticon-release
+        path: bin/Release/extracticon.exe
+        
+    - name: Upload Debug artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: extracticon-debug
+        path: bin/Debug/extracticon.exe
+
+  release:
+    needs: build
+    runs-on: windows-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v3
+      
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: ExtractIcon ${{ github.ref_name }}
+        body: |
+          ExtractIcon ${{ github.ref_name }}
+          
+          ## What's Changed
+          * Check the commit history for changes
+          
+          ## Installation
+          Download `extracticon.exe` from the assets below.
+          
+          ## Requirements
+          - Windows 7 or later
+          - .NET Framework 4.6.1 or later
+          - (Optional) ImageMagick for high-quality resizing
+        draft: false
+        prerelease: false
+        
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./extracticon-release/extracticon.exe
+        asset_name: extracticon.exe
+        asset_content_type: application/octet-stream
+        
+    - name: Upload Debug Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./extracticon-debug/extracticon.exe
+        asset_name: extracticon-debug.exe
+        asset_content_type: application/octet-stream

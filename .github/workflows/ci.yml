@@ -1,0 +1,48 @@
+name: CI Build
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.1
+      
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v1
+      
+    - name: Restore NuGet packages
+      run: nuget restore ExtractIcon.sln
+      
+    - name: Build
+      run: msbuild ExtractIcon.sln /p:Configuration=${{ matrix.configuration }} /p:Platform="Any CPU"
+      
+    - name: Test extraction
+      run: |
+        cd bin\${{ matrix.configuration }}
+        .\extracticon.exe ..\..\src\Program.cs test-output.png
+        if (Test-Path test-output.png) {
+          Write-Host "✅ Test passed - icon extracted successfully"
+          Remove-Item test-output.png
+        } else {
+          Write-Host "❌ Test failed - no output file created"
+          exit 1
+        }
+      
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: extracticon-${{ matrix.configuration }}
+        path: bin/${{ matrix.configuration }}/extracticon.exe
