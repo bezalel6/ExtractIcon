@@ -1,69 +1,68 @@
 ExtractIcon
 ===========
 
-Simple command line utility to extract a Windows file icon as a PNG in its highest resolution. Tested on Windows 10 for icons with resolutions of 16x16, 32x32, 48x48, 64x64, and 256x256.
+Simple command line utility to extract a Windows file icon as a PNG in its highest resolution. Automatically detects and extracts icons at their native sizes up to 256x256.
 
 ## Key Improvements in This Fork
 
-**Fixed icon extraction for system files**: Added an application manifest that declares the app as DPI-aware and uses proper Windows compatibility settings. Without this manifest, Windows would return generic cached icons instead of the actual file icons for executables in Program Files and other protected directories.
+**Custom size output**: Use the `-size` parameter to resize extracted icons to any dimension you need. Icons are resized using high-quality algorithms (ImageMagick if available, or bicubic interpolation as fallback).
 
-**Added size selection**: You can now specify which icon size you want with the `-size` parameter. The original always extracted at 256x256; now you can choose any power of 2 from 4 to 256 (4, 8, 16, 32, 64, 128, or 256) to get the high-quality icon resized to the resolution you need.
-
-**Automatic preview mode**: When no output path is provided, the icon is saved to a temporary file and automatically opened in your default image viewer. Windows handles cleanup of temporary files automatically.
+**Xbox Game Pass support**: Automatically detects and extracts icons from Xbox Game Pass and Windows Store applications, which store their icons as PNG files rather than embedded resources.
 
 Usage
 =====
 
-To output the icon associated with an executable as a PNG:
-
+Basic usage:
 ```
-extracticon.exe file.exe file-icon.png
-```
-
-To extract and automatically preview an icon (saves to temp directory):
-
-```
-extracticon.exe file.exe
+extracticon.exe [input_file] [output_png] [-size N]
 ```
 
-To output the icon associated with the PDF file handler as a PNG:
+### Examples
 
+Extract icon to a specific file:
 ```
-extracticon.exe file.pdf file-icon.png
-```
-
-To output an icon with a specific size (e.g., 64x64):
-
-```
-extracticon.exe file.exe file-icon.png -size 64
+extracticon.exe notepad.exe notepad-icon.png
 ```
 
-To extract and preview an icon at a specific size:
-
+Extract and automatically preview (saves to temp and opens):
 ```
-extracticon.exe file.exe -size 32
+extracticon.exe notepad.exe
 ```
 
-### Size Parameter
+Extract icon from any file type (uses associated program's icon):
+```
+extracticon.exe document.pdf pdf-icon.png
+```
 
-The `-size` parameter accepts power of 2 values: 4, 8, 16, 32, 64, 128, or 256. This uses ImageMagick (if installed) to resize the extracted icon to your desired dimensions while maintaining quality.
+Extract and resize to specific dimensions:
+```
+extracticon.exe notepad.exe icon-64.png -size 64
+extracticon.exe game.exe icon-512.png -size 512
+```
+
+### Parameters
+
+- **input_file**: Path to the file whose icon you want to extract
+- **output_png**: (Optional) Path for the output PNG file. If omitted, saves to temp directory and opens automatically
+- **-size N**: (Optional) Resize the icon to N×N pixels. Accepts any positive integer value
 
 ### Xbox Game Pass Support
 
-ExtractIcon includes special support for Xbox Game Pass applications, which store their icons as PNG files rather than embedded resources. For 256px output, you can use the `-larger` flag to force extraction from the high-resolution 1080px source icon instead of the default 150px icon, resulting in better quality at the cost of processing time.
+ExtractIcon automatically detects Xbox Game Pass and Windows Store applications and extracts their icons from PNG files in the application package. The largest available icon is automatically selected for the best quality.
 
+### Requirements
+
+- Windows 7 or later
+- .NET Framework 4.6.1 or later
+- (Optional) ImageMagick for highest quality resizing - available at https://imagemagick.org/
+
+### Building
+
+The project uses MSBuild and targets .NET Framework 4.6.1:
+
+```bash
+# Build in Release mode
+msbuild ExtractIcon.sln /p:Configuration=Release
 ```
-extracticon.exe XboxGame.exe icon.png -size 256 -larger
-```
 
-### Troubleshooting
-
-The debug build (`bin\Debug\extracticon.exe`) is included in this repository specifically for troubleshooting icon extraction issues. It provides detailed diagnostic logging for:
-
-- File access errors and permission issues (especially for protected directories)
-- Xbox Game Pass icon detection and file selection process
-- Icon size detection and resizing decisions
-- Windows API error codes with human-readable descriptions
-- Step-by-step extraction process for debugging failures
-
-To use the debug build, simply run `bin\Debug\extracticon.exe` instead of the release version. The debug output will help identify why icon extraction might be failing for specific files.
+The compiled executable will be in `bin\Release\extracticon.exe`.
