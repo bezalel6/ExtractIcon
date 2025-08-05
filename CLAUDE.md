@@ -34,17 +34,21 @@ The compiled executable will be in `bin\Debug\` or `bin\Release\` as `extractico
 
 ## Usage
 
-The utility expects two command-line arguments:
+The utility supports the following command-line arguments:
 1. Input file path (the file whose icon you want to extract)
-2. Output PNG file path
+2. Output PNG file path (optional - if omitted, saves to temp and opens)
+3. `-size N` (optional - resize icon to N×N pixels)
+4. `-debug` (optional - enable detailed diagnostic output)
 
 ```bash
-extracticon.exe [input_file] [output_png]
+extracticon.exe [input_file] [output_png] [-size N] [-debug]
 ```
 
 Examples:
 - Extract icon from an executable: `extracticon.exe notepad.exe notepad-icon.png`
 - Extract icon from a file type: `extracticon.exe document.pdf pdf-icon.png`
+- Extract with custom size: `extracticon.exe app.exe icon.png -size 64`
+- Extract with debug info: `extracticon.exe app.exe icon.png -debug`
 
 ## Technical Details
 
@@ -54,3 +58,17 @@ Examples:
 - Uses short path names internally to handle paths with special characters
 - Creates output directories if they don't exist
 - Uses the original long path for icon extraction to avoid Windows icon cache issues that can return incorrect icons for files in certain locations (like Program Files)
+
+## Debug Mode
+
+When the `-debug` flag is specified, the application provides detailed diagnostic information:
+
+- **Path Processing**: Shows original and short path conversions
+- **API Calls**: Displays Windows Shell32 API call results and return codes
+- **Icon Detection**: Reports icon index, detected size, and bitmap dimensions
+- **Xbox Game Support**: Lists all PNG files found and their sizes when extracting Xbox icons
+- **ImageMagick**: Shows command line arguments and process exit codes
+- **Error Details**: Provides specific Win32 error codes and their meanings
+- **Processing Steps**: Traces through each major step of the extraction process
+
+This diagnostic information is prefixed with `[DEBUG]` and helps troubleshoot extraction issues.

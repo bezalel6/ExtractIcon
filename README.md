@@ -14,7 +14,7 @@ Usage
 
 Basic usage:
 ```
-extracticon.exe [input_file] [output_png] [-size N]
+extracticon.exe [input_file] [output_png] [-size N] [-debug]
 ```
 
 ### Examples
@@ -40,11 +40,31 @@ extracticon.exe notepad.exe icon-64.png -size 64
 extracticon.exe game.exe icon-512.png -size 512
 ```
 
+Extract with debug information:
+```
+extracticon.exe notepad.exe icon.png -debug
+extracticon.exe "C:\Program Files\App\app.exe" -debug
+```
+
 ### Parameters
 
 - **input_file**: Path to the file whose icon you want to extract
 - **output_png**: (Optional) Path for the output PNG file. If omitted, saves to temp directory and opens automatically
 - **-size N**: (Optional) Resize the icon to N×N pixels. Accepts any positive integer value
+- **-debug**: (Optional) Enable debug mode to display detailed diagnostic information
+
+### Debug Mode
+
+When the `-debug` flag is enabled, ExtractIcon provides detailed diagnostic information about the icon extraction process, including:
+
+- File paths being processed (original and short paths)
+- Windows API call results and error codes
+- Icon detection and sizing information
+- Xbox Game Pass icon search details
+- ImageMagick command execution details
+- Bitmap dimensions and processing steps
+
+This information is helpful for troubleshooting extraction issues or understanding why certain icons may not extract as expected.
 
 ### Xbox Game Pass Support
 
