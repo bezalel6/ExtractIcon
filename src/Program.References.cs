@@ -29,6 +29,12 @@ namespace extracticon
         #region DLL Imports
         [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
         public static extern int GetShortPathName([MarshalAs(UnmanagedType.LPTStr)] string path, [MarshalAs(UnmanagedType.LPTStr)] StringBuilder shortPath, int shortPathLength);
+        
+        [DllImport("ole32.dll")]
+        public static extern int CoInitialize(IntPtr pvReserved);
+        
+        [DllImport("ole32.dll")]
+        public static extern void CoUninitialize();
 
         [DllImport("gdi32.dll", EntryPoint = "CreateDC")]
         internal extern static IntPtr CreateDC(string strDriver, string strDevice, string strOutput, IntPtr pData);
