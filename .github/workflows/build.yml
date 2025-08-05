@@ -13,13 +13,13 @@ jobs:
     runs-on: windows-latest
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v1.1
+      uses: microsoft/setup-msbuild@v2
       
     - name: Setup NuGet
-      uses: NuGet/setup-nuget@v1
+      uses: NuGet/setup-nuget@v2
       
     - name: Restore NuGet packages
       run: nuget restore ExtractIcon.sln
@@ -31,13 +31,13 @@ jobs:
       run: msbuild ExtractIcon.sln /p:Configuration=Debug /p:Platform="Any CPU"
       
     - name: Upload Release artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: extracticon-release
         path: bin/Release/extracticon.exe
         
     - name: Upload Debug artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: extracticon-debug
         path: bin/Debug/extracticon.exe
@@ -48,19 +48,16 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Download artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: ncipollo/release-action@v1
       with:
-        tag_name: ${{ github.ref_name }}
-        release_name: ExtractIcon ${{ github.ref_name }}
+        tag: ${{ github.ref_name }}
+        name: ExtractIcon ${{ github.ref_name }}
         body: |
           ExtractIcon ${{ github.ref_name }}
           
@@ -72,27 +69,17 @@ jobs:
           
           ## Requirements
           - Windows 7 or later
-          - .NET Framework 4.6.1 or later
+          - .NET Framework 4.8 or later
           - (Optional) ImageMagick for high-quality resizing
+          
+          ## New Features
+          - Debug mode with `-debug` flag for troubleshooting
+          - Enhanced icon extraction for Program Files executables
+          - Comprehensive diagnostic output
+        artifacts: |
+          extracticon-release/extracticon.exe
+          extracticon-debug/extracticon.exe
+        artifactContentType: application/octet-stream
         draft: false
         prerelease: false
-        
-    - name: Upload Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./extracticon-release/extracticon.exe
-        asset_name: extracticon.exe
-        asset_content_type: application/octet-stream
-        
-    - name: Upload Debug Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./extracticon-debug/extracticon.exe
-        asset_name: extracticon-debug.exe
-        asset_content_type: application/octet-stream
+        token: ${{ secrets.GITHUB_TOKEN }}
